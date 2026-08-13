@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Auto Next Lesson",
+  "version": "1.0",
+  "description": "Automatically clicks Next Lesson when the countdown timer hits 00:00:00.",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
