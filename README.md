@@ -147,3 +147,29 @@ fields above.
 - **Toggling the popup off doesn't seem to do anything visible** — that's
   expected, it just stops future clicks; it won't undo anything already
   clicked.
+- **Console shows "Clicked Next Lesson" but the page doesn't actually
+  advance, plus a red CSP `script-src` error mentioning a "JavaScript URL".**
+  Some course platforms (notably ones built on ASP.NET WebForms, where the
+  "Next" link's `href` looks like
+  `javascript:__doPostBack('ctl00$MainContent$butNext','')`) have a
+  Content-Security-Policy that blocks the browser from following that
+  `javascript:` link when the click is script-generated, even though a real
+  click on the same button works fine. The extension detects this link shape
+  automatically and calls `__doPostBack` directly instead of clicking through
+  it, which sidesteps the CSP block — you shouldn't need to do anything, but
+  if you see `[AutoNext] Postback click failed, falling back to native
+  click: ...` in the console, that fallback path hit the same CSP wall and
+  the click genuinely didn't happen; the reason logged alongside it (e.g.
+  `element-not-found`, `onclick-gate-returned-false`) says why.
+- **You want to add a second site and it's still not running there even
+  after configuring Allowed hostnames / a site profile.** Unlike the
+  `<all_urls>` setup described in this project's `CLAUDE.md`, this install's
+  `manifest.json` currently restricts the content script itself to one exact
+  site via `content_scripts.matches` (and a matching `host_permissions`
+  entry). The options page's **Allowed hostnames** only controls behavior
+  *within* sites the manifest already covers — it can't extend Chrome's
+  actual injection permission to a brand-new site. To add another site you
+  need to edit both the `matches` array and `host_permissions` array in
+  `manifest.json` to include it, then reload the unpacked extension at
+  `chrome://extensions` (a manifest change, unlike options-page changes,
+  does require that reload).

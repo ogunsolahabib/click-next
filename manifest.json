@@ -3,7 +3,13 @@
   "name": "Auto Next Lesson",
   "version": "1.0",
   "description": "Automatically clicks Next Lesson when the countdown timer hits 00:00:00.",
-  "permissions": ["storage"],
+  "permissions": [
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://member.getdefensive.com/*"
+  ],
   "options_page": "options.html",
   "action": {
     "default_popup": "popup.html"
@@ -22,8 +28,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "https://member.getdefensive.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ]

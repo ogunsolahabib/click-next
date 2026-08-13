@@ -183,6 +183,44 @@ function hostnameAllowed(activeConfig, siteProfiles) {
   return matchesAllowedHostnames || matchesSiteProfile;
 }
 
+// ASP.NET WebForms renders "Next" links as
+// `<a id="..." href="javascript:__doPostBack('id','arg')" onclick="...">`.
+// On some sites (confirmed: member.getdefensive.com), the page's CSP blocks
+// the browser from following that `javascript:` href when the click is
+// script-generated — a real user click works, `el.click()` from here
+// doesn't (Chrome logs a script-src violation for the javascript:
+// navigation specifically). Detected generically by href shape, not tied to
+// any one site/button id, so it also covers other WebForms-based LMS pages.
+const DOPOSTBACK_HREF_RE =
+  /^javascript:__doPostBack\(\s*'([^']*)'\s*,\s*'([^']*)'\s*\)\s*;?\s*$/;
+
+function isWebFormsPostbackLink(el) {
+  if (!el || el.tagName !== "A" || !el.id) return false;
+  return DOPOSTBACK_HREF_RE.test(el.getAttribute("href") || "");
+}
+
+// Asks background.js (T4.4-ish addition alongside the T4.3 keyboard
+// shortcut listener already living there) to call __doPostBack directly in
+// the page's own JS context via chrome.scripting.executeScript, instead of
+// letting the browser navigate to the javascript: href. That's a plain
+// function call rather than a URL-scheme navigation, so it isn't subject to
+// the same CSP gate — see background.js's runWebFormsPostback for the full
+// rationale. Requires the "scripting" permission + host_permissions.
+function clickViaPostback(el) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(
+      { type: "AUTONEXT_POSTBACK", elementId: el.id },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          resolve({ ok: false, reason: chrome.runtime.lastError.message });
+          return;
+        }
+        resolve(response || { ok: false, reason: "no-response" });
+      }
+    );
+  });
+}
+
 // Looks for the Next Lesson button and clicks it. If it's not found yet
 // (e.g. it renders a beat after the timer hits 00:00:00), retries with
 // backoff up to activeConfig.buttonRetryAttempts times instead of giving up
@@ -200,6 +238,22 @@ function clickNext(activeConfig, attempt = 0) {
   const matches = candidates.filter((el) => matchesButton(el, activeConfig));
   const btn = matches.find((el) => isClickable(el));
   if (btn) {
+    if (isWebFormsPostbackLink(btn)) {
+      clickViaPostback(btn).then((result) => {
+        if (result && result.ok) {
+          console.log("[AutoNext] Clicked Next Lesson (via postback)");
+        } else {
+          console.log(
+            "[AutoNext] Postback click failed, falling back to native click:",
+            result && result.reason
+          );
+          btn.click();
+          console.log("[AutoNext] Clicked Next Lesson (fallback)");
+        }
+      });
+      return;
+    }
+
     btn.click();
     console.log("[AutoNext] Clicked Next Lesson");
     return;
