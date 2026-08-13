@@ -6,8 +6,19 @@ const CONFIG = {
   // Only run on pages whose hostname includes one of these strings.
   // Leave empty ([]) to run on any site.
   allowedHostnames: ["your-lms-domain.com"],
+  // timerLabelText/nextButtonText (T3.3) accept either a single string
+  // (backward compatible with existing saved chrome.storage.sync data and
+  // T2.1's plain-input options page) or an array of alternate strings. Every
+  // entry is tried; the first one that matches wins. Use this when a site
+  // rewords its copy (e.g. "TIME REMAINING" vs "TIME LEFT") instead of
+  // maintaining a separate site profile just for wording.
   timerLabelText: "TIME REMAINING",
   nextButtonText: "Next Lesson",
+  // Optional extra button-matching signals (T3.3), tried in addition to
+  // nextButtonText's textContent match. Same string-or-array shape. Unset/
+  // empty by default, so behavior is unchanged unless configured.
+  ariaLabel: [],
+  dataTestId: [],
   pollIntervalMs: 1000,
   // Not configurable via the options page (T2.1) — edit here if needed.
   clickDelayMs: 500,
@@ -23,10 +34,12 @@ const CONFIG = {
   buttonRetryAttempts: 5,
   buttonRetryBackoffMs: 500,
   // Per-site overrides (T2.3), edited via options.html. Each entry is
-  // { hostname, timerLabelText, nextButtonText }. The first profile whose
-  // `hostname` is a substring of location.hostname wins; timerLabelText/
-  // nextButtonText above (and allowedHostnames) remain the fallback default
-  // profile for hosts that don't match any entry here.
+  // { hostname, timerLabelText, nextButtonText, ariaLabel, dataTestId }
+  // (the last four accept a string or array, same as above). The first
+  // profile whose `hostname` is a substring of location.hostname wins;
+  // timerLabelText/nextButtonText/ariaLabel/dataTestId above (and
+  // allowedHostnames) remain the fallback default profile for hosts that
+  // don't match any entry here.
   siteProfiles: [],
 };
 // --------------------------------------
@@ -38,6 +51,70 @@ let hasClicked = false;
 // and updated via chrome.storage.onChanged so an already-open tab reacts
 // within one poll interval without needing a page reload.
 let enabled = true;
+
+// ---- Multi-pattern matching helpers (T3.3) ----
+// timerLabelText/nextButtonText/ariaLabel/dataTestId are each allowed to be
+// either a single string (how they've always been saved by options.js) or
+// an array of alternate strings. toList() normalizes either shape into a
+// flat array of trimmed, non-empty strings so the rest of the matching code
+// only has to deal with one shape.
+function toList(value) {
+  if (Array.isArray(value)) {
+    return value
+      .filter((v) => typeof v === "string" && v.trim().length > 0)
+      .map((v) => v.trim());
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    return [value.trim()];
+  }
+  return [];
+}
+
+// True if `value` is a non-empty string or a non-empty array — used to
+// decide whether a per-site profile field should override the global
+// default (empty/unset means "no override", same as the old falsy check,
+// but array-aware since `[]` is truthy in JS).
+function hasValue(value) {
+  return Array.isArray(value) ? value.length > 0 : Boolean(value && String(value).trim());
+}
+
+function pickOverride(value, fallback) {
+  return hasValue(value) ? value : fallback;
+}
+
+// Builds one case-insensitive "<label>\s*:?\s*(HH:MM:SS)" regex per entry in
+// timerLabelTextList, so tick() can try each alternate label in turn.
+function buildTimerRegexes(timerLabelTextList) {
+  return timerLabelTextList.map(
+    (label) =>
+      new RegExp(
+        label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+          "\\s*:?\\s*(\\d{2}:\\d{2}:\\d{2})",
+        "i"
+      )
+  );
+}
+
+// True if `el` matches any configured next-button signal: textContent
+// substring against any nextButtonTextList entry, aria-label substring
+// against any ariaLabelList entry, or data-testid exact/substring match
+// against any dataTestIdList entry. Any single match is enough.
+function matchesButton(el, { nextButtonTextList, ariaLabelList, dataTestIdList }) {
+  const text = el.textContent ? el.textContent.trim().toLowerCase() : "";
+  const matchesText = nextButtonTextList.some((t) => text.includes(t.toLowerCase()));
+  if (matchesText) return true;
+
+  const ariaLabelAttr = el.getAttribute && el.getAttribute("aria-label");
+  const matchesAriaLabel =
+    !!ariaLabelAttr &&
+    ariaLabelList.some((a) => ariaLabelAttr.toLowerCase().includes(a.toLowerCase()));
+  if (matchesAriaLabel) return true;
+
+  const testIdAttr = el.getAttribute && el.getAttribute("data-testid");
+  const matchesTestId =
+    !!testIdAttr && dataTestIdList.some((t) => testIdAttr === t || testIdAttr.includes(t));
+  return matchesTestId;
+}
 
 // Returns the first site profile whose `hostname` substring matches the
 // current page, or null if none match (falls back to activeConfig's
@@ -79,19 +156,15 @@ function hostnameAllowed(activeConfig, siteProfiles) {
 // (e.g. it renders a beat after the timer hits 00:00:00), retries with
 // backoff up to activeConfig.buttonRetryAttempts times instead of giving up
 // after a single miss (T3.2). `attempt` counts retries already performed,
-// starting at 0 for the first (non-retry) call.
+// starting at 0 for the first (non-retry) call. Matching is multi-pattern
+// (T3.3): textContent, aria-label, or data-testid against their respective
+// configured alternate lists — see matchesButton().
 function clickNext(activeConfig, attempt = 0) {
   const candidates = Array.from(
     document.querySelectorAll('button, a, [role="button"]')
   );
   const btn = candidates.find(
-    (el) =>
-      el.textContent &&
-      el.textContent
-        .trim()
-        .toLowerCase()
-        .includes(activeConfig.nextButtonText.toLowerCase()) &&
-      !el.disabled
+    (el) => matchesButton(el, activeConfig) && !el.disabled
   );
   if (btn) {
     btn.click();
@@ -117,13 +190,23 @@ function clickNext(activeConfig, attempt = 0) {
   }
 }
 
-function tick(activeConfig, timerRe) {
+// timerRegexes (T3.3) is an array of per-alternate-label regexes built by
+// buildTimerRegexes(); the first one that matches document.body.innerText
+// wins.
+function tick(activeConfig, timerRegexes) {
   if (!enabled) return;
 
-  const match = document.body.innerText.match(timerRe);
-  if (!match) return;
+  const text = document.body.innerText;
+  let value = null;
+  for (const re of timerRegexes) {
+    const match = text.match(re);
+    if (match) {
+      value = match[1];
+      break;
+    }
+  }
+  if (value === null) return;
 
-  const value = match[1];
   if (value === "00:00:00") {
     // hasClicked stays true for the whole clickNext() retry chain (T3.2),
     // so a concurrent tick() from the other trigger (interval vs.
