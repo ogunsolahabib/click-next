@@ -120,15 +120,27 @@
 
     <label for="timerLabelText">
       Default timer label text
-      <span class="sub">Text preceding the HH:MM:SS countdown, e.g. "TIME REMAINING". Used when no site profile below matches the page.</span>
+      <span class="sub">Text preceding the HH:MM:SS countdown, e.g. "TIME REMAINING". Comma-separated alternates are tried in order, e.g. "TIME REMAINING, TIME LEFT". Used when no site profile below matches the page.</span>
     </label>
     <input type="text" id="timerLabelText" name="timerLabelText" />
 
     <label for="nextButtonText">
       Default next button text
-      <span class="sub">Text (or substring) shown on the button to click, e.g. "Next Lesson". Used when no site profile below matches the page.</span>
+      <span class="sub">Text (or substring) shown on the button to click, e.g. "Next Lesson". Comma-separated alternates are all tried, e.g. "Next Lesson, Continue". Used when no site profile below matches the page.</span>
     </label>
     <input type="text" id="nextButtonText" name="nextButtonText" />
+
+    <label for="ariaLabel">
+      Default button aria-label (optional)
+      <span class="sub">Matches the button's aria-label attribute as a substring, in addition to its text. Comma-separated alternates allowed. Leave blank to skip this check.</span>
+    </label>
+    <input type="text" id="ariaLabel" name="ariaLabel" />
+
+    <label for="dataTestId">
+      Default button data-testid (optional)
+      <span class="sub">Matches the button's data-testid attribute (exact or substring), in addition to its text/aria-label. Comma-separated alternates allowed. Leave blank to skip this check.</span>
+    </label>
+    <input type="text" id="dataTestId" name="dataTestId" />
 
     <label for="pollIntervalMs">
       Poll interval (ms)

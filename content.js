@@ -227,24 +227,43 @@ function init(activeConfig, siteProfiles) {
   if (!hostnameAllowed(activeConfig, siteProfiles)) return;
 
   // Resolve per-site overrides (T2.3): a matching profile's
-  // timerLabelText/nextButtonText win over the global defaults;
-  // pollIntervalMs and allowedHostnames stay global.
+  // timerLabelText/nextButtonText/ariaLabel/dataTestId win over the global
+  // defaults (only for fields the profile actually sets — hasValue() treats
+  // an empty/unset field as "no override"); pollIntervalMs and
+  // allowedHostnames stay global.
   const matchedProfile = findMatchingProfile(siteProfiles);
   const effectiveConfig = matchedProfile
     ? {
         ...activeConfig,
-        timerLabelText:
-          matchedProfile.timerLabelText || activeConfig.timerLabelText,
-        nextButtonText:
-          matchedProfile.nextButtonText || activeConfig.nextButtonText,
+        timerLabelText: pickOverride(
+          matchedProfile.timerLabelText,
+          activeConfig.timerLabelText
+        ),
+        nextButtonText: pickOverride(
+          matchedProfile.nextButtonText,
+          activeConfig.nextButtonText
+        ),
+        ariaLabel: pickOverride(matchedProfile.ariaLabel, activeConfig.ariaLabel),
+        dataTestId: pickOverride(
+          matchedProfile.dataTestId,
+          activeConfig.dataTestId
+        ),
       }
     : activeConfig;
 
-  const timerRe = new RegExp(
-    effectiveConfig.timerLabelText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
-      "\\s*:?\\s*(\\d{2}:\\d{2}:\\d{2})",
-    "i"
-  );
+  // Multi-pattern matching (T3.3): normalize each field to a list (a plain
+  // string, as saved by pre-T3.3 options.js, becomes a single-element list)
+  // and build one timer regex per alternate label. matchConfig carries the
+  // normalized lists alongside the rest of effectiveConfig so clickNext()
+  // and tick() don't need to re-normalize on every call.
+  const timerLabelTextList = toList(effectiveConfig.timerLabelText);
+  const timerRegexes = buildTimerRegexes(timerLabelTextList);
+  const matchConfig = {
+    ...effectiveConfig,
+    nextButtonTextList: toList(effectiveConfig.nextButtonText),
+    ariaLabelList: toList(effectiveConfig.ariaLabel),
+    dataTestIdList: toList(effectiveConfig.dataTestId),
+  };
 
   console.log(
     "[AutoNext] Active config",
@@ -256,7 +275,7 @@ function init(activeConfig, siteProfiles) {
   // replace) in case the timer text updates without triggering a DOM
   // mutation event (e.g. a requestAnimationFrame-driven redraw).
   setInterval(
-    () => tick(effectiveConfig, timerRe),
+    () => tick(matchConfig, timerRegexes),
     effectiveConfig.pollIntervalMs
   );
 
@@ -270,7 +289,7 @@ function init(activeConfig, siteProfiles) {
     if (observerDebounceHandle) clearTimeout(observerDebounceHandle);
     observerDebounceHandle = setTimeout(() => {
       observerDebounceHandle = null;
-      tick(effectiveConfig, timerRe);
+      tick(matchConfig, timerRegexes);
     }, effectiveConfig.observerDebounceMs);
   };
 
@@ -292,6 +311,8 @@ if (chrome.storage && chrome.storage.sync) {
       allowedHostnames: CONFIG.allowedHostnames,
       timerLabelText: CONFIG.timerLabelText,
       nextButtonText: CONFIG.nextButtonText,
+      ariaLabel: CONFIG.ariaLabel,
+      dataTestId: CONFIG.dataTestId,
       pollIntervalMs: CONFIG.pollIntervalMs,
       siteProfiles: CONFIG.siteProfiles,
       enabled: true,
