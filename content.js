@@ -11,6 +11,17 @@ const CONFIG = {
   pollIntervalMs: 1000,
   // Not configurable via the options page (T2.1) — edit here if needed.
   clickDelayMs: 500,
+  // Debounce window (ms) for the MutationObserver callback (T3.1). DOM
+  // mutations can fire in rapid bursts (e.g. SPA route transitions), so
+  // tick() is coalesced to run at most once per this many ms instead of
+  // once per mutation record.
+  observerDebounceMs: 150,
+  // Retry knobs for clickNext() (T3.2). If the timer hits 00:00:00 but the
+  // Next Lesson button hasn't rendered yet, clickNext() retries this many
+  // times before giving up, with the delay between attempts doubling each
+  // time starting from buttonRetryBackoffMs (e.g. 500ms, 1000ms, 2000ms, ...).
+  buttonRetryAttempts: 5,
+  buttonRetryBackoffMs: 500,
   // Per-site overrides (T2.3), edited via options.html. Each entry is
   // { hostname, timerLabelText, nextButtonText }. The first profile whose
   // `hostname` is a substring of location.hostname wins; timerLabelText/
@@ -64,7 +75,12 @@ function hostnameAllowed(activeConfig, siteProfiles) {
   return matchesAllowedHostnames || matchesSiteProfile;
 }
 
-function clickNext(activeConfig) {
+// Looks for the Next Lesson button and clicks it. If it's not found yet
+// (e.g. it renders a beat after the timer hits 00:00:00), retries with
+// backoff up to activeConfig.buttonRetryAttempts times instead of giving up
+// after a single miss (T3.2). `attempt` counts retries already performed,
+// starting at 0 for the first (non-retry) call.
+function clickNext(activeConfig, attempt = 0) {
   const candidates = Array.from(
     document.querySelectorAll('button, a, [role="button"]')
   );
@@ -80,8 +96,24 @@ function clickNext(activeConfig) {
   if (btn) {
     btn.click();
     console.log("[AutoNext] Clicked Next Lesson");
+    return;
+  }
+
+  const maxAttempts = activeConfig.buttonRetryAttempts;
+  if (attempt < maxAttempts) {
+    const nextAttempt = attempt + 1;
+    const backoffMs = activeConfig.buttonRetryBackoffMs * 2 ** attempt;
+    console.log(
+      `[AutoNext] Next Lesson button not found, retrying (attempt ${nextAttempt}/${maxAttempts})...`
+    );
+    setTimeout(
+      () => clickNext(activeConfig, nextAttempt),
+      backoffMs
+    );
   } else {
-    console.log("[AutoNext] Next Lesson button not found");
+    console.log(
+      `[AutoNext] Next Lesson button not found, gave up after ${maxAttempts} attempts`
+    );
   }
 }
 
@@ -93,6 +125,11 @@ function tick(activeConfig, timerRe) {
 
   const value = match[1];
   if (value === "00:00:00") {
+    // hasClicked stays true for the whole clickNext() retry chain (T3.2),
+    // so a concurrent tick() from the other trigger (interval vs.
+    // MutationObserver, T3.1) can't start a second, independent retry
+    // chain while one is already in flight. It only resets below once the
+    // timer is observed counting again on the next lesson.
     if (!hasClicked) {
       hasClicked = true;
       setTimeout(() => clickNext(activeConfig), activeConfig.clickDelayMs);
@@ -131,10 +168,36 @@ function init(activeConfig, siteProfiles) {
     effectiveConfig,
     matchedProfile ? "(matched site profile)" : "(default profile)"
   );
+
+  // setInterval stays as a safety-net fallback (T3.1 "augment", not
+  // replace) in case the timer text updates without triggering a DOM
+  // mutation event (e.g. a requestAnimationFrame-driven redraw).
   setInterval(
     () => tick(effectiveConfig, timerRe),
     effectiveConfig.pollIntervalMs
   );
+
+  // MutationObserver (T3.1): catches SPA navigations and dynamically
+  // injected timers/buttons immediately, instead of waiting up to
+  // pollIntervalMs for the next scheduled tick(). Debounced so a burst of
+  // mutation records (e.g. a whole SPA route swap) triggers one coalesced
+  // tick() rather than one per record.
+  let observerDebounceHandle = null;
+  const debouncedTick = () => {
+    if (observerDebounceHandle) clearTimeout(observerDebounceHandle);
+    observerDebounceHandle = setTimeout(() => {
+      observerDebounceHandle = null;
+      tick(effectiveConfig, timerRe);
+    }, effectiveConfig.observerDebounceMs);
+  };
+
+  const observer = new MutationObserver(debouncedTick);
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
+  console.log("[AutoNext] MutationObserver attached to document.body");
 }
 
 // Load user-configurable fields from chrome.storage.sync (set via
