@@ -116,6 +116,37 @@ function matchesButton(el, { nextButtonTextList, ariaLabelList, dataTestIdList }
   return matchesTestId;
 }
 
+// True if `el` is actually interactable — not disabled, not aria-disabled,
+// and not sitting inside a hidden container (T3.4). Kept separate from
+// matchesButton() so "does this look like the right button" and "is it
+// actually clickable right now" stay independent, ANDed together by callers.
+function isClickable(el) {
+  // Native `disabled` only applies to <button>/form elements — undefined on
+  // <a>/[role="button"] divs, where sites instead signal a disabled state via
+  // aria-disabled (always a string on ARIA attrs, hence the === "true").
+  if (el.disabled) return false;
+  if (el.getAttribute && el.getAttribute("aria-disabled") === "true") return false;
+
+  // `hidden` attribute, or an `aria-hidden="true"` ancestor (closest() walks
+  // the tree natively, so this is cheap even on deep DOM).
+  if (el.hidden) return false;
+  if (el.closest && el.closest('[aria-hidden="true"]')) return false;
+
+  // offsetParent === null is a cheap (no getComputedStyle) proxy for "not
+  // rendered", covering display:none on the element or any ancestor without
+  // walking the tree by hand. Tradeoff: it's also null for position:fixed
+  // elements, an acceptable false positive here — worst case that just
+  // triggers T3.2's retry instead of skipping a click.
+  if (el.offsetParent === null) return false;
+
+  // `visibility` is inherited, so checking the element's own computed style
+  // also catches visibility:hidden set on an ancestor, with one call instead
+  // of walking up manually.
+  if (getComputedStyle(el).visibility === "hidden") return false;
+
+  return true;
+}
+
 // Returns the first site profile whose `hostname` substring matches the
 // current page, or null if none match (falls back to activeConfig's
 // timerLabelText/nextButtonText).
@@ -158,14 +189,16 @@ function hostnameAllowed(activeConfig, siteProfiles) {
 // after a single miss (T3.2). `attempt` counts retries already performed,
 // starting at 0 for the first (non-retry) call. Matching is multi-pattern
 // (T3.3): textContent, aria-label, or data-testid against their respective
-// configured alternate lists — see matchesButton().
+// configured alternate lists — see matchesButton(). A candidate that matches
+// but isn't actually clickable yet (disabled/aria-disabled/hidden — T3.4)
+// counts as "not found" here, same as no match at all, so it feeds into the
+// same retry chain instead of a silent no-op or a click on an inert element.
 function clickNext(activeConfig, attempt = 0) {
   const candidates = Array.from(
     document.querySelectorAll('button, a, [role="button"]')
   );
-  const btn = candidates.find(
-    (el) => matchesButton(el, activeConfig) && !el.disabled
-  );
+  const matches = candidates.filter((el) => matchesButton(el, activeConfig));
+  const btn = matches.find((el) => isClickable(el));
   if (btn) {
     btn.click();
     console.log("[AutoNext] Clicked Next Lesson");
@@ -173,11 +206,14 @@ function clickNext(activeConfig, attempt = 0) {
   }
 
   const maxAttempts = activeConfig.buttonRetryAttempts;
+  const foundButNotClickable = matches.length > 0;
   if (attempt < maxAttempts) {
     const nextAttempt = attempt + 1;
     const backoffMs = activeConfig.buttonRetryBackoffMs * 2 ** attempt;
     console.log(
-      `[AutoNext] Next Lesson button not found, retrying (attempt ${nextAttempt}/${maxAttempts})...`
+      foundButNotClickable
+        ? `[AutoNext] Next Lesson button matched but is disabled/hidden, retrying (attempt ${nextAttempt}/${maxAttempts})...`
+        : `[AutoNext] Next Lesson button not found, retrying (attempt ${nextAttempt}/${maxAttempts})...`
     );
     setTimeout(
       () => clickNext(activeConfig, nextAttempt),
@@ -185,7 +221,9 @@ function clickNext(activeConfig, attempt = 0) {
     );
   } else {
     console.log(
-      `[AutoNext] Next Lesson button not found, gave up after ${maxAttempts} attempts`
+      foundButNotClickable
+        ? `[AutoNext] Next Lesson button matched but stayed disabled/hidden, gave up after ${maxAttempts} attempts`
+        : `[AutoNext] Next Lesson button not found, gave up after ${maxAttempts} attempts`
     );
   }
 }
