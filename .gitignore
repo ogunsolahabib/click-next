@@ -1,0 +1,51 @@
+# === Chrome Extension Specifics ===
+# Generated zip files for Chrome Web Store publishing
+*.zip
+*.crx
+*.pem
+
+# Local Chrome configuration and user data (if running a separate test profile)
+.chrome/
+chrome-user-data/
+
+# === Environment & Secrets ===
+# Store your extension API keys, Client IDs, or OAuth secrets here
+.env
+.env.local
+.env.*.local
+
+# === Build and Dependency Outputs ===
+# Node dependencies (if using npm/yarn/pnpm)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Production build outputs (Webpack, Vite, Rollup, etc.)
+dist/
+build/
+out/
+
+# === System and IDE Files ===
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+.claude/
+
+CLAUDE.md
+ROADMAP.md
