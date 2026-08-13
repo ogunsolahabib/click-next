@@ -8,6 +8,18 @@
   "action": {
     "default_popup": "popup.html"
   },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "commands": {
+    "toggle-enabled": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "Turn Auto Next Lesson on/off (same as the popup toggle)"
+    }
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],

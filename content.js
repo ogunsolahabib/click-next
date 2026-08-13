@@ -361,12 +361,13 @@ if (chrome.storage && chrome.storage.sync) {
     }
   );
 
-  // Keep the in-memory `enabled` flag in sync with popup.html toggles so
-  // tick() reflects the change on its very next poll, without a page reload.
+  // Keep the in-memory `enabled` flag in sync with popup.html toggles (T2.2)
+  // and the keyboard shortcut (T4.3, flipped by background.js) so tick()
+  // reflects the change on its very next poll, without a page reload.
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === "sync" && changes.enabled) {
       enabled = changes.enabled.newValue;
-      console.log("[AutoNext] Enabled changed via popup:", enabled);
+      console.log("[AutoNext] Enabled changed:", enabled);
     }
   });
 } else {
