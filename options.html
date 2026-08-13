@@ -67,6 +67,44 @@
       color: #188038;
       min-height: 16px;
     }
+    h2 {
+      font-size: 15px;
+      margin-top: 28px;
+      margin-bottom: 4px;
+      border-top: 1px solid #eee;
+      padding-top: 16px;
+    }
+    .profile-row {
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 12px;
+      margin-top: 12px;
+      position: relative;
+    }
+    .profile-row label {
+      margin-top: 8px;
+    }
+    .profile-row label:first-of-type {
+      margin-top: 0;
+    }
+    .remove-profile {
+      margin-top: 10px;
+      background: #d93025;
+      padding: 5px 10px;
+      font-size: 12px;
+    }
+    .remove-profile:hover {
+      background: #a52714;
+    }
+    #add-profile {
+      background: #fff;
+      color: #1a73e8;
+      border: 1px solid #1a73e8;
+      margin-top: 12px;
+    }
+    #add-profile:hover {
+      background: #eef4fd;
+    }
   </style>
 </head>
 <body>
@@ -81,24 +119,33 @@
     <textarea id="allowedHostnames" name="allowedHostnames"></textarea>
 
     <label for="timerLabelText">
-      Timer label text
-      <span class="sub">Text preceding the HH:MM:SS countdown, e.g. "TIME REMAINING".</span>
+      Default timer label text
+      <span class="sub">Text preceding the HH:MM:SS countdown, e.g. "TIME REMAINING". Used when no site profile below matches the page.</span>
     </label>
     <input type="text" id="timerLabelText" name="timerLabelText" />
 
     <label for="nextButtonText">
-      Next button text
-      <span class="sub">Text (or substring) shown on the button to click, e.g. "Next Lesson".</span>
+      Default next button text
+      <span class="sub">Text (or substring) shown on the button to click, e.g. "Next Lesson". Used when no site profile below matches the page.</span>
     </label>
     <input type="text" id="nextButtonText" name="nextButtonText" />
 
     <label for="pollIntervalMs">
       Poll interval (ms)
-      <span class="sub">How often the page is scanned for the timer.</span>
+      <span class="sub">How often the page is scanned for the timer. Applies to every site.</span>
     </label>
     <input type="number" id="pollIntervalMs" name="pollIntervalMs" min="100" step="100" />
 
-    <button type="submit">Save</button>
+    <h2>Site profiles</h2>
+    <p class="hint">
+      Override the timer/button text per site, since not every LMS uses the
+      same wording. The first profile whose hostname matches the current
+      page wins; if none match, the defaults above are used.
+    </p>
+    <div id="profiles-list"></div>
+    <button type="button" id="add-profile">+ Add site profile</button>
+
+    <div><button type="submit">Save</button></div>
     <div id="status"></div>
   </form>
 

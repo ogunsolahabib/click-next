@@ -28,11 +28,40 @@ let hasClicked = false;
 // within one poll interval without needing a page reload.
 let enabled = true;
 
-function hostnameAllowed(activeConfig) {
-  if (!activeConfig.allowedHostnames.length) return true;
-  return activeConfig.allowedHostnames.some((h) =>
-    location.hostname.includes(h)
+// Returns the first site profile whose `hostname` substring matches the
+// current page, or null if none match (falls back to activeConfig's
+// timerLabelText/nextButtonText).
+function findMatchingProfile(siteProfiles) {
+  if (!Array.isArray(siteProfiles)) return null;
+  return (
+    siteProfiles.find(
+      (p) => p && p.hostname && location.hostname.includes(p.hostname)
+    ) || null
   );
+}
+
+// A site counts as allowed if either the global allowedHostnames list
+// matches, or any configured per-site profile's hostname matches. If
+// neither allowedHostnames nor siteProfiles are configured at all, allow
+// every site (preserves T1.3's allowlist-empty-means-allow-all behavior).
+function hostnameAllowed(activeConfig, siteProfiles) {
+  const hasAllowedHostnames =
+    Array.isArray(activeConfig.allowedHostnames) &&
+    activeConfig.allowedHostnames.length > 0;
+  const hasSiteProfiles = Array.isArray(siteProfiles) && siteProfiles.length > 0;
+
+  if (!hasAllowedHostnames && !hasSiteProfiles) return true;
+
+  const matchesAllowedHostnames =
+    hasAllowedHostnames &&
+    activeConfig.allowedHostnames.some((h) => location.hostname.includes(h));
+  const matchesSiteProfile =
+    hasSiteProfiles &&
+    siteProfiles.some(
+      (p) => p && p.hostname && location.hostname.includes(p.hostname)
+    );
+
+  return matchesAllowedHostnames || matchesSiteProfile;
 }
 
 function clickNext(activeConfig) {
@@ -74,17 +103,38 @@ function tick(activeConfig, timerRe) {
   }
 }
 
-function init(activeConfig) {
-  if (!hostnameAllowed(activeConfig)) return;
+function init(activeConfig, siteProfiles) {
+  if (!hostnameAllowed(activeConfig, siteProfiles)) return;
+
+  // Resolve per-site overrides (T2.3): a matching profile's
+  // timerLabelText/nextButtonText win over the global defaults;
+  // pollIntervalMs and allowedHostnames stay global.
+  const matchedProfile = findMatchingProfile(siteProfiles);
+  const effectiveConfig = matchedProfile
+    ? {
+        ...activeConfig,
+        timerLabelText:
+          matchedProfile.timerLabelText || activeConfig.timerLabelText,
+        nextButtonText:
+          matchedProfile.nextButtonText || activeConfig.nextButtonText,
+      }
+    : activeConfig;
 
   const timerRe = new RegExp(
-    activeConfig.timerLabelText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+    effectiveConfig.timerLabelText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
       "\\s*:?\\s*(\\d{2}:\\d{2}:\\d{2})",
     "i"
   );
 
-  console.log("[AutoNext] Active config", activeConfig);
-  setInterval(() => tick(activeConfig, timerRe), activeConfig.pollIntervalMs);
+  console.log(
+    "[AutoNext] Active config",
+    effectiveConfig,
+    matchedProfile ? "(matched site profile)" : "(default profile)"
+  );
+  setInterval(
+    () => tick(effectiveConfig, timerRe),
+    effectiveConfig.pollIntervalMs
+  );
 }
 
 // Load user-configurable fields from chrome.storage.sync (set via
@@ -97,11 +147,12 @@ if (chrome.storage && chrome.storage.sync) {
       timerLabelText: CONFIG.timerLabelText,
       nextButtonText: CONFIG.nextButtonText,
       pollIntervalMs: CONFIG.pollIntervalMs,
+      siteProfiles: CONFIG.siteProfiles,
       enabled: true,
     },
     (stored) => {
       enabled = stored.enabled;
-      init({ ...CONFIG, ...stored });
+      init({ ...CONFIG, ...stored }, stored.siteProfiles);
     }
   );
 
@@ -115,5 +166,5 @@ if (chrome.storage && chrome.storage.sync) {
   });
 } else {
   console.log("[AutoNext] chrome.storage unavailable, using hardcoded CONFIG");
-  init(CONFIG);
+  init(CONFIG, CONFIG.siteProfiles);
 }
