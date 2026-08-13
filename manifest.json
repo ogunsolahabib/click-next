@@ -5,6 +5,9 @@
   "description": "Automatically clicks Next Lesson when the countdown timer hits 00:00:00.",
   "permissions": ["storage"],
   "options_page": "options.html",
+  "action": {
+    "default_popup": "popup.html"
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],

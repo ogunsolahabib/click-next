@@ -11,10 +11,22 @@ const CONFIG = {
   pollIntervalMs: 1000,
   // Not configurable via the options page (T2.1) — edit here if needed.
   clickDelayMs: 500,
+  // Per-site overrides (T2.3), edited via options.html. Each entry is
+  // { hostname, timerLabelText, nextButtonText }. The first profile whose
+  // `hostname` is a substring of location.hostname wins; timerLabelText/
+  // nextButtonText above (and allowedHostnames) remain the fallback default
+  // profile for hosts that don't match any entry here.
+  siteProfiles: [],
 };
 // --------------------------------------
 
 let hasClicked = false;
+
+// Live on/off flag, toggled from popup.html (T2.2). Defaults to true so
+// behavior is unaffected for users who never open the popup. Kept in memory
+// and updated via chrome.storage.onChanged so an already-open tab reacts
+// within one poll interval without needing a page reload.
+let enabled = true;
 
 function hostnameAllowed(activeConfig) {
   if (!activeConfig.allowedHostnames.length) return true;
@@ -45,6 +57,8 @@ function clickNext(activeConfig) {
 }
 
 function tick(activeConfig, timerRe) {
+  if (!enabled) return;
+
   const match = document.body.innerText.match(timerRe);
   if (!match) return;
 
@@ -83,11 +97,22 @@ if (chrome.storage && chrome.storage.sync) {
       timerLabelText: CONFIG.timerLabelText,
       nextButtonText: CONFIG.nextButtonText,
       pollIntervalMs: CONFIG.pollIntervalMs,
+      enabled: true,
     },
     (stored) => {
+      enabled = stored.enabled;
       init({ ...CONFIG, ...stored });
     }
   );
+
+  // Keep the in-memory `enabled` flag in sync with popup.html toggles so
+  // tick() reflects the change on its very next poll, without a page reload.
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === "sync" && changes.enabled) {
+      enabled = changes.enabled.newValue;
+      console.log("[AutoNext] Enabled changed via popup:", enabled);
+    }
+  });
 } else {
   console.log("[AutoNext] chrome.storage unavailable, using hardcoded CONFIG");
   init(CONFIG);
