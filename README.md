@@ -37,6 +37,18 @@ if you don't see it) to open the popup. It has a single **Enabled** toggle:
 This setting is stored in your Chrome profile and applies everywhere, not
 per-tab.
 
+**A note on background tabs:** while a lesson tab is focused, the extension
+reacts within about a second of the timer hitting zero. If you switch away
+to another tab, Chrome throttles JavaScript timers in hidden tabs to save
+power (this affects the site's own countdown display too, not just the
+extension) — it can't click through that reliably, so instead it checks
+roughly once a minute whether the Next button looks ready, and if so shows a
+Chrome notification with a **Go to lesson** button. Clicking it switches you
+to that tab, which then clicks "Next" itself within about a second, same as
+if it had been focused the whole time. So a background tab needs one click
+on the notification (not a full manual switch-and-click) rather than being
+fully hands-off like a focused tab.
+
 You can also flip the same toggle with a keyboard shortcut, without opening
 the popup — the default is **Ctrl+Shift+Y** (**Command+Shift+Y** on Mac). If
 that combination conflicts with something else on your system, you can
@@ -173,3 +185,12 @@ fields above.
   `manifest.json` to include it, then reload the unpacked extension at
   `chrome://extensions` (a manifest change, unlike options-page changes,
   does require that reload).
+- **No notification appears for a background tab.** Make sure Chrome
+  notifications aren't disabled for Chrome itself at the OS level (macOS
+  System Settings → Notifications → Google Chrome; Windows Settings →
+  Notifications), and that you've waited at least a minute after the timer
+  finished — the background check only runs roughly once a minute (see
+  "A note on background tabs" above). You can also check the extension's own
+  background activity: `chrome://extensions` → Details → click **service
+  worker** (or **Inspect views: service worker**) → Console, which logs
+  `[AutoNext]`-prefixed messages independent of any page's own console.

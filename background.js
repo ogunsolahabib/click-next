@@ -107,3 +107,140 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return true; // keep the message channel open for the async sendResponse above
 });
+
+// ---- Background tab notifications via chrome.alarms ----
+// Chrome throttles setInterval/setTimeout (and the site's own JS-driven
+// countdown, and our MutationObserver debounce) once a tab is hidden, to
+// save power — confirmed: the extension only clicks promptly while the tab
+// is focused, and does nothing until you switch back to it. Trying to click
+// through that from the background turned out unreliable to depend on, so
+// instead: chrome.alarms wakes the service worker on a schedule that isn't
+// tied to any tab's visibility, and from there we just check (read-only,
+// no click) whether each matching tab's Next button looks ready — if so, a
+// notification lets you jump straight to it with one click. Once that tab
+// is actually focused, content.js's existing setInterval/MutationObserver
+// path (unthrottled while visible) does the real clicking itself, same as
+// it always has. Requires "alarms" and "notifications" permissions.
+//
+// Deliberately stateless across restarts for the polling itself: rather
+// than tracking which tabs registered in an in-memory Set (which MV3
+// service-worker restarts — every ~30s idle — would make stale well before
+// this 1-minute alarm fires again), each tick freshly queries for tabs
+// whose URL matches the same patterns content.js is injected into. Reading
+// content_scripts[].matches straight from the manifest keeps this in sync
+// with that list automatically, with no third copy of the pattern to
+// maintain by hand. `notifiedTabs` (in-memory, keyed by tabId) exists only
+// to avoid re-popping the same notification every single minute while a
+// tab sits unattended and ready — worst case after a SW restart is one
+// duplicate notification, not a functional break.
+//
+// Tradeoff: chrome.alarms can't fire faster than about once a minute, far
+// coarser than the ~1s poll content.js uses while foregrounded — so a
+// background tab's notification may appear up to ~60s after the timer
+// actually hits 00:00:00. Foreground tabs are unaffected.
+const POLL_ALARM_NAME = "autonext-background-poll";
+const CONTENT_SCRIPT_URL_PATTERNS = (
+  chrome.runtime.getManifest().content_scripts || []
+).flatMap((cs) => cs.matches || []);
+const NOTIFICATION_ID_PREFIX = "autonext-tab-";
+
+// tabId -> true, only for tabs currently showing (or having just shown) a
+// "ready" notification — cleared once that tab is no longer ready (moved on
+// to the next lesson, guard reset) so it can notify again next time.
+const notifiedTabs = new Set();
+
+// Guard with alarms.get instead of an unconditional create(): alarms persist
+// on their own across service-worker restarts (Chrome tracks them outside
+// the SW's lifetime), but this top-level code re-runs on every restart —
+// calling create() unconditionally here would re-arm the alarm for "1
+// minute from now" on every wake, and per chrome.alarms' docs, creating an
+// alarm with a name that already exists cancels and replaces it. If
+// anything else woke the SW before the minute was up, the countdown would
+// keep getting reset and the alarm might never actually fire.
+chrome.alarms.get(POLL_ALARM_NAME, (existing) => {
+  if (existing) return;
+  chrome.alarms.create(POLL_ALARM_NAME, { periodInMinutes: 1 });
+});
+
+function notifyTabReady(tabId) {
+  chrome.notifications.create(
+    NOTIFICATION_ID_PREFIX + tabId,
+    {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("notification-icon.png"),
+      title: "Auto Next Lesson",
+      message: "The timer's done — click to jump back to that tab.",
+      buttons: [{ title: "Go to lesson" }],
+      requireInteraction: true,
+    },
+    () => void chrome.runtime.lastError
+  );
+}
+
+function switchToTab(tabId) {
+  chrome.tabs.get(tabId, (tab) => {
+    if (chrome.runtime.lastError || !tab) return;
+    chrome.windows.update(tab.windowId, { focused: true }, () => {
+      void chrome.runtime.lastError;
+      chrome.tabs.update(tabId, { active: true }, () => {
+        void chrome.runtime.lastError;
+      });
+    });
+  });
+}
+
+function handleNotificationActivated(notificationId) {
+  if (!notificationId.startsWith(NOTIFICATION_ID_PREFIX)) return;
+  const tabId = Number(notificationId.slice(NOTIFICATION_ID_PREFIX.length));
+  if (!Number.isFinite(tabId)) return;
+  switchToTab(tabId);
+  notifiedTabs.delete(tabId);
+  chrome.notifications.clear(notificationId);
+}
+
+chrome.notifications.onButtonClicked.addListener((notificationId) =>
+  handleNotificationActivated(notificationId)
+);
+chrome.notifications.onClicked.addListener((notificationId) =>
+  handleNotificationActivated(notificationId)
+);
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== POLL_ALARM_NAME) return;
+  if (!CONTENT_SCRIPT_URL_PATTERNS.length) return;
+
+  chrome.tabs.query({ url: CONTENT_SCRIPT_URL_PATTERNS }, (tabs) => {
+    if (chrome.runtime.lastError) return;
+
+    for (const tab of tabs) {
+      if (typeof tab.id !== "number") continue;
+      const tabId = tab.id;
+
+      chrome.scripting.executeScript(
+        {
+          target: { tabId },
+          func: () =>
+            // __autoNextIsReadyToClick only exists once content.js's init()
+            // has actually run for this page (i.e. its own, options-page-
+            // driven hostnameAllowed() check passed) — a tab matched here
+            // purely by manifest URL pattern but not yet initialized (or
+            // that failed its own stricter check) just reports not-ready.
+            typeof window.__autoNextIsReadyToClick === "function" &&
+            window.__autoNextIsReadyToClick(),
+        },
+        (results) => {
+          if (chrome.runtime.lastError) return;
+          const ready = Boolean(results && results[0] && results[0].result);
+
+          if (ready && !notifiedTabs.has(tabId)) {
+            notifiedTabs.add(tabId);
+            notifyTabReady(tabId);
+          } else if (!ready && notifiedTabs.has(tabId)) {
+            notifiedTabs.delete(tabId);
+            chrome.notifications.clear(NOTIFICATION_ID_PREFIX + tabId);
+          }
+        }
+      );
+    }
+  });
+});

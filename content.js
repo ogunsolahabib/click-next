@@ -363,6 +363,30 @@ function init(activeConfig, siteProfiles) {
     matchedProfile ? "(matched site profile)" : "(default profile)"
   );
 
+  // Exposed so background.js can ask "is the Next button ready to click
+  // right now?" from a chrome.alarms callback, without actually clicking —
+  // background tabs are throttled (see background.js's "Background tab
+  // notifications" section), so rather than trying to click through that
+  // unreliably, background.js just watches for readiness and prompts you
+  // with a notification to switch back; once this tab is genuinely
+  // foregrounded, the existing setInterval/MutationObserver path above
+  // (unthrottled while visible) does the actual clicking itself, same as
+  // always. Deliberately read-only: reuses matchesButton()/isClickable()
+  // but never touches hasClicked or calls clickNext(). Lives on `window` in
+  // this content script's isolated world, shared automatically with any
+  // additional isolated-world chrome.scripting.executeScript call Chrome
+  // makes into this tab — no messaging/registration needed, background.js
+  // finds this tab on its own by querying for URLs matching manifest.json's
+  // content_scripts patterns.
+  window.__autoNextIsReadyToClick = () => {
+    const candidates = Array.from(
+      document.querySelectorAll('button, a, [role="button"]')
+    );
+    return candidates.some(
+      (el) => matchesButton(el, matchConfig) && isClickable(el)
+    );
+  };
+
   // setInterval stays as a safety-net fallback (T3.1 "augment", not
   // replace) in case the timer text updates without triggering a DOM
   // mutation event (e.g. a requestAnimationFrame-driven redraw).
